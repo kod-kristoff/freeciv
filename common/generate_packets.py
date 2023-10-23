@@ -359,10 +359,7 @@ class Location:
 
     def __init__(self, name: str, location: "str | None" = None, depth: int = 0):
         self.name = name
-        if location is None:
-            self.location = name
-        else:
-            self.location = location
+        self.location = name if location is None else location
         self.depth = depth
 
     def deeper(self, new_location: str) -> "Location":
@@ -448,8 +445,7 @@ class FieldFlags:
                 continue
             raise ValueError(f"unrecognized flag in field declaration: {flag}")
 
-        contradictions = self.add_caps & self.remove_caps
-        if contradictions:
+        if contradictions := self.add_caps & self.remove_caps:
             raise ValueError("cannot have same capabilities as both add-cap and remove-cap: " + ", ".join(contradictions))
 
 
@@ -493,9 +489,7 @@ class SizeInfo:
     def actual_for(self, packet: str) -> str:
         """Return a code expression representing the actual size for the
         given packet"""
-        if self.constant:
-            return self.declared
-        return f"{packet}->{self._actual}"
+        return self.declared if self.constant else f"{packet}->{self._actual}"
 
     @property
     def real(self) -> str:
@@ -969,7 +963,7 @@ class StructType(BasicType):
     def get_code_handle_param(self, location: Location) -> str:
         if not location.depth:
             # top level: pass by-reference
-            return "const " + super().get_code_handle_param(location.deeper(f"*{location}"))
+            return f'const {super().get_code_handle_param(location.deeper(f"*{location}"))}'
         return super().get_code_handle_param(location)
 
     def get_code_handle_arg(self, location: Location) -> str:
@@ -1183,12 +1177,10 @@ differ = FALSE;
 {
 """
         inner_cmp = prefix("    ", self.elem.get_code_cmp(location.sub))
-        return head + f"""\
-  int {location.index};
+        return f"""{head}\\n        #  int {location.index};
 
   for ({location.index} = 0; {location.index} < {self.size.real}; {location.index}++) {{
-{inner_cmp}\
-    if (differ) {{
+{inner_cmp}\\n        #    if (differ) {{
       break;
     }}
   }}
@@ -1757,7 +1749,9 @@ class Variant:
         self.other_fields = [field for field in self.fields if not field.is_key]
         # FIXME: Doesn't work with non-int key fields
         self.keys_format = ", ".join(["%d"] * len(self.key_fields))
-        self.keys_arg = ", ".join("real_packet->" + field.name for field in self.key_fields)
+        self.keys_arg = ", ".join(
+            f"real_packet->{field.name}" for field in self.key_fields
+        )
         if self.keys_arg:
             self.keys_arg = ",\n    " + self.keys_arg
 
@@ -2086,10 +2080,6 @@ static bool cmp_{self.name}(const void *vkey1, const void *vkey2)
 
         if not self.no_packet:
             if self.delta:
-                if self.want_force:
-                    diff = "force_to_send"
-                else:
-                    diff = "0"
                 delta_header = f"""\
 #ifdef FREECIV_DELTA_PROTOCOL
   {self.name}_fields fields;
@@ -2103,6 +2093,7 @@ static bool cmp_{self.name}(const void *vkey1, const void *vkey2)
   struct genhash **hash = pc->phs.sent + {self.type};
 """
                 if self.is_info != "no":
+                    diff = "force_to_send" if self.want_force else "0"
                     delta_header += f"""\
   int different = {diff};
 """
@@ -2291,14 +2282,15 @@ if (NULL != *hash) {{
 #endif /* FREECIV_JSON_CONNECTION */
   DIO_BV_GET(&din, &field_addr, fields);
 """
-            body1 = "".join(
-                prefix("  ", field.get_get(True))
-                for field in self.key_fields
-            )
-            body1 += """\
+            body1 = (
+                "".join(
+                    prefix("  ", field.get_get(True)) for field in self.key_fields
+                )
+                + """\
 
 #else /* FREECIV_DELTA_PROTOCOL */
 """
+            )
             body2 = prefix("  ", self.get_delta_receive_body())
         else:
             delta_header=""
@@ -2324,13 +2316,6 @@ if (NULL != *hash) {{
         else:
             log=""
 
-        if self.packet.want_post_recv:
-            post = f"""\
-  post_receive_{self.packet_name}(pc, real_packet);
-"""
-        else:
-            post=""
-
         if self.fields:
             faddr = """\
 #ifdef FREECIV_JSON_CONNECTION
@@ -2345,6 +2330,12 @@ if (NULL != *hash) {{
         else:
             faddr = ""
 
+        post = (
+            f"""\\n        #  post_receive_{self.packet_name}(pc, real_packet);
+"""
+            if self.packet.want_post_recv
+            else ""
+        )
         return "".join((
             f"""\
 {self.receive_prototype}
@@ -3024,7 +3015,7 @@ class PacketsDefinition(typing.Iterable[Packet]):
                 packet_number = int(packet_number)
 
                 if packet_type in self.packets_by_type:
-                    raise ValueError("Duplicate packet type: " + packet_type)
+                    raise ValueError(f"Duplicate packet type: {packet_type}")
 
                 if packet_number not in range(65536):
                     raise ValueError(f"packet number {packet_number:d} for {packet_type} outside legal range [0,65536)")
@@ -3046,7 +3037,7 @@ class PacketsDefinition(typing.Iterable[Packet]):
                 self.packets_by_dirs[packet.dirs].append(packet)
                 continue
 
-            raise ValueError("Unexpected line: " + line)
+            raise ValueError(f"Unexpected line: {line}")
 
     def resolve_type(self, type_text: str) -> RawFieldType:
         """Resolve the given type"""
@@ -3057,12 +3048,11 @@ class PacketsDefinition(typing.Iterable[Packet]):
     def define_type(self, alias: str, meaning: str):
         """Define a type alias"""
         if alias in self.types:
-            if meaning == self.types[alias]:
-                self.cfg.log_verbose(f"duplicate typedef: {alias!r} = {meaning!r}")
-                return
-            else:
+            if meaning != self.types[alias]:
                 raise ValueError(f"duplicate type alias {alias!r}: {self.types[alias]!r} and {meaning!r}")
 
+            self.cfg.log_verbose(f"duplicate typedef: {alias!r} = {meaning!r}")
+            return
         self.types[alias] = self.resolve_type(meaning)
 
     def __init__(self, cfg: ScriptConfig, type_registry: "TypeRegistry | None" = None):
@@ -3376,11 +3366,7 @@ enum packet_type {
 """
         body = ""
         for n, packet, skipped in self.iter_by_number():
-            if skipped:
-                line = f"  {packet.type} = {n:d},"
-            else:
-                line = f"  {packet.type},"
-
+            line = f"  {packet.type} = {n:d}," if skipped else f"  {packet.type},"
             if not (n % 10):
                 line = f"{line:40} /* {n:d} */"
             body += line + "\n"
@@ -3525,10 +3511,6 @@ bool server_handle_packet(enum packet_type type, const void *packet,
         for p in packets:
             if p.dirs.up and not p.no_handle:
                 a=p.name[len("packet_"):]
-                b = "".join(
-                    f", {field.get_handle_param()}"
-                    for field in p.fields
-                )
                 if p.handle_per_conn:
                     sender = "struct connection *pc"
                 else:
@@ -3539,6 +3521,10 @@ struct {p.name};
 void handle_{a}({sender}, const struct {p.name} *packet);
 """)
                 else:
+                    b = "".join(
+                        f", {field.get_handle_param()}"
+                        for field in p.fields
+                    )
                     f.write(f"""\
 void handle_{a}({sender}{b});
 """)
@@ -3611,11 +3597,7 @@ bool server_handle_packet(enum packet_type type, const void *packet,
                     for field in p.fields
                 )
 
-            if p.handle_per_conn:
-                first_arg = "pconn"
-            else:
-                first_arg = "pplayer"
-
+            first_arg = "pconn" if p.handle_per_conn else "pplayer"
             f.write(f"""\
   case {p.type}:
     handle_{a}({first_arg}{args});

@@ -432,12 +432,22 @@ class Specenum:
             option: str = mo.group(1)
             arg: "str | None" = mo.group(2)
 
-            if option == "prefix":
-                if self.prefix:
+            if option == "bitvector":
+                if self.bitvector is not None:
                     raise ValueError(f"duplicate option {option!r} for enum {self.name}")
-                if not arg:
+                if arg is None:
                     raise ValueError(f"option {option!r} for enum {self.name} requires an argument")
-                self.prefix = arg
+                self.bitvector = arg
+            elif option == "bitwise":
+                if self.bitwise:
+                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
+                if arg is not None:
+                    raise ValueError(f"option {option!r} for enum {self.name} does not support an argument")
+                self.bitwise = True
+            elif option == "count":
+                if self.count is not None:
+                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
+                self.count = __class__.DEFAULT_COUNT if arg is None else EnumValue.parse(arg)
             elif option == "generic":
                 if generic_amount:
                     raise ValueError(f"duplicate option {option!r} for enum {self.name}")
@@ -450,26 +460,6 @@ class Specenum:
                 if not generic_amount:
                     raise ValueError(f"amount for option {option!r} of enum {self.name} must be positive")
                 generic_prefix = mo_g.group(2)
-            elif option == "bitwise":
-                if self.bitwise:
-                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
-                if arg is not None:
-                    raise ValueError(f"option {option!r} for enum {self.name} does not support an argument")
-                self.bitwise = True
-            elif option == "zero":
-                if self.zero is not None:
-                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
-                if arg is None:
-                    self.zero = __class__.DEFAULT_ZERO
-                else:
-                    self.zero = EnumValue.parse(arg)
-            elif option == "count":
-                if self.count is not None:
-                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
-                if arg is None:
-                    self.count = __class__.DEFAULT_COUNT
-                else:
-                    self.count = EnumValue.parse(arg)
             elif option == "invalid":
                 if self.invalid is not None:
                     raise ValueError(f"duplicate option {option!r} for enum {self.name}")
@@ -488,12 +478,16 @@ class Specenum:
                 if arg is not None:
                     raise ValueError(f"option {option!r} for enum {self.name} does not support an argument")
                 self.name_updater = True
-            elif option == "bitvector":
-                if self.bitvector is not None:
+            elif option == "prefix":
+                if self.prefix:
                     raise ValueError(f"duplicate option {option!r} for enum {self.name}")
-                if arg is None:
+                if not arg:
                     raise ValueError(f"option {option!r} for enum {self.name} requires an argument")
-                self.bitvector = arg
+                self.prefix = arg
+            elif option == "zero":
+                if self.zero is not None:
+                    raise ValueError(f"duplicate option {option!r} for enum {self.name}")
+                self.zero = __class__.DEFAULT_ZERO if arg is None else EnumValue.parse(arg)
             else:
                 raise ValueError(f"unrecognized option {option!r} for enum {self.name}")
 
@@ -683,7 +677,7 @@ class EnumsDefinition(typing.Iterable[Specenum]):
                 enum_name, = mo.groups("")
 
                 if enum_name in self.enums_by_name:
-                    raise ValueError("Duplicate enum name: " + enum_name)
+                    raise ValueError(f"Duplicate enum name: {enum_name}")
 
                 enum = Specenum(
                     enum_name,
@@ -697,7 +691,7 @@ class EnumsDefinition(typing.Iterable[Specenum]):
                 self.enums_by_name[enum_name] = enum
                 continue
 
-            raise ValueError("Unexpected line: " + line)
+            raise ValueError(f"Unexpected line: {line}")
 
     def __init__(self, cfg: ScriptConfig):
         self.cfg = cfg
